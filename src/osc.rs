@@ -1,90 +1,37 @@
-use crate::{Config, Sample, pitch::SamplePitch};
+use crate::{Config, Process, envin, ops::An};
 
-pub struct Osc<Wave, Pitch> {
-    phase: f32,
-    pitch: Pitch,
-    _wave: Wave,
+pub struct Sine<Freq> {
+    freq: Freq,
+    phase: f64,
 }
 
-pub trait OscExt: Sized {
-    fn sin(self) -> Osc<Sine, Self> {
-        Osc {
-            phase: 0.0,
-            pitch: self,
-            _wave: Sine,
-        }
-    }
-
-    fn triangle(self) -> Osc<Triangle, Self> {
-        Osc {
-            phase: 0.0,
-            pitch: self,
-            _wave: Triangle,
-        }
-    }
-
-    fn square(self) -> Osc<Square, Self> {
-        Osc {
-            phase: 0.0,
-            pitch: self,
-            _wave: Square,
-        }
-    }
-}
-
-impl<T> OscExt for T where T: SamplePitch {}
-
-pub struct Sine;
-
-impl<Pitch> Sample for Osc<Sine, Pitch>
+pub fn sin<Freq>(freq: Freq) -> An<Sine<Freq>>
 where
-    Pitch: SamplePitch,
+    Freq: Process,
 {
-    fn sample(&mut self, samples: &mut [f32], config: &Config) {
-        lidsp::sine(
-            samples,
-            config.sample_rate,
-            config.channels,
-            &mut self.phase,
-            // TODO: for each sample
-            || self.pitch.sample_pitch(config).unwrap_or_default(),
-        );
+    An(Sine { freq, phase: 0.0 })
+}
+
+impl<Freq> Process for Sine<Freq>
+where
+    Freq: Process,
+{
+    fn sample(&mut self, config: &Config) -> f32 {
+        let phase = self.phase;
+        self.phase += self.freq.sample(config) as f64 * config.sample_duration;
+        self.phase = self.phase.fract();
+        (phase as f32 * core::f32::consts::TAU).sin()
     }
 }
 
-pub struct Triangle;
+// TODO: why doesn't this work?
+// pub fn sin<Freq: Process>(freq: Freq) -> An<impl Process> {
+//     An(envin(
+//         |t, f| (t * f as f64 * core::f64::consts::TAU).sin() as f32,
+//         freq,
+//     ))
+// }
 
-impl<Pitch> Sample for Osc<Triangle, Pitch>
-where
-    Pitch: SamplePitch,
-{
-    fn sample(&mut self, samples: &mut [f32], config: &Config) {
-        lidsp::triangle(
-            samples,
-            config.sample_rate,
-            config.channels,
-            &mut self.phase,
-            // TODO: for each sample
-            || self.pitch.sample_pitch(config).unwrap_or_default(),
-        );
-    }
-}
-
-pub struct Square;
-
-impl<Pitch> Sample for Osc<Square, Pitch>
-where
-    Pitch: SamplePitch,
-{
-    fn sample(&mut self, samples: &mut [f32], config: &Config) {
-        lidsp::square(
-            samples,
-            config.sample_rate,
-            config.channels,
-            &mut self.phase,
-            // TODO: for each sample
-            || self.pitch.sample_pitch(config).unwrap_or_default(),
-            0.5,
-        );
-    }
+pub fn saw<Freq: Process>(freq: Freq) -> An<impl Process> {
+    An(envin(|t, f| ((t * f as f64) % 1.0) as f32, freq))
 }

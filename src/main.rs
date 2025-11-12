@@ -6,6 +6,7 @@ fn main() {
         0,
         |_| {},
         acid::update_and_render,
-        Some("target/debug/libacid.dylib"),
+        // Some("target/debug/libacid.dylib"),
+        None,
     );
 }

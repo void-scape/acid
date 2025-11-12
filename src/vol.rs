@@ -1,4 +1,4 @@
-use crate::{Config, Sample};
+use crate::{Config, Process};
 
 pub struct LinearVolume<Src> {
     src: Src,
@@ -11,14 +11,18 @@ pub trait LinearVolumeExt: Sized {
     }
 }
 
-impl<T> LinearVolumeExt for T where T: Sample {}
+impl<T> LinearVolumeExt for T where T: Process {}
 
-impl<Src> Sample for LinearVolume<Src>
+impl<Src> Process for LinearVolume<Src>
 where
-    Src: Sample,
+    Src: Process,
 {
-    fn sample(&mut self, samples: &mut [f32], config: &Config) {
-        self.src.sample(samples, config);
+    fn sample(&mut self, _: &Config) -> f32 {
+        self.volume
+    }
+
+    fn process(&mut self, samples: &mut [f32], config: &Config) {
+        self.src.process(samples, config);
         lidsp::linear_volume(samples, self.volume);
     }
 }
