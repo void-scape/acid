@@ -1,34 +1,14 @@
 use crate::{Config, Process, ops::An};
 
-pub fn samples(samples: usize) -> An<impl Process> {
-    let mut csample = 0;
-    An(move |_: &Config| {
-        let sample = if csample >= samples {
-            csample = 0;
-            1.0
-        } else {
-            0.0
-        };
-        csample += 1;
-        sample
-    })
-}
-
-pub fn beats(beats: usize) -> An<impl Process> {
-    let mut sample = 0.0;
-    let mut cbeat = 0;
+pub fn step<const LEN: usize, Src>(mut steps: [Src; LEN]) -> An<impl FnMut(&Config) -> f32 + Copy>
+where
+    Src: Copy + Process,
+{
+    let mut current = 0;
     An(move |config: &Config| {
-        sample += 1.0;
-        if sample >= config.spb {
-            sample -= config.spb;
-            cbeat += 1;
-        }
-        if cbeat >= beats {
-            cbeat -= beats;
-            1.0
-        } else {
-            0.0
-        }
+        let sample = steps[current].sample(config);
+        current = (current + 1) % LEN;
+        sample
     })
 }
 
@@ -41,19 +21,17 @@ pub struct Seg<Src> {
     init: bool,
 }
 
-pub trait SegExt: Process + Sized {
-    fn seg(self, seg: usize) -> An<Seg<Self>> {
-        An(Seg {
-            src: self,
+impl<Src> Seg<Src> {
+    pub fn new(src: Src, seg: usize) -> Self {
+        Self {
+            src,
             seg: seg as f64,
             t: 0.0,
             retained: 0.0,
             init: false,
-        })
+        }
     }
 }
-
-impl<T> SegExt for T where T: Process {}
 
 impl<Src> Process for Seg<Src>
 where
@@ -71,44 +49,11 @@ where
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct Step<const STEPS: usize> {
-    steps: [f32; STEPS],
-    current: usize,
-}
-
-pub fn step<const STEPS: usize>(steps: [f32; STEPS]) -> An<Step<STEPS>> {
-    An(Step { steps, current: 0 })
-}
-
-impl<const STEPS: usize> Process for Step<STEPS> {
-    fn sample(&mut self, _: &Config) -> f32 {
-        let sample = self.steps[self.current];
-        self.current = (self.current + 1) % STEPS;
-        sample
-    }
-}
-
 pub struct ReTrigger<Src, Trig> {
     src: Src,
     trig: Trig,
     triggered: bool,
 }
-
-pub trait ReTriggerExt: Process + Sized {
-    fn retrig<Trig>(self, trigger: Trig) -> An<ReTrigger<Self, Trig>>
-    where
-        Trig: Process,
-    {
-        An(ReTrigger {
-            src: self,
-            trig: trigger,
-            triggered: false,
-        })
-    }
-}
-
-impl<T> ReTriggerExt for T where T: Process {}
 
 impl<Src, Trig> Process for ReTrigger<Src, Trig>
 where
@@ -124,5 +69,23 @@ where
             self.triggered = false;
         }
         self.src.sample(config)
+    }
+}
+
+impl<T> TrigExt for T where T: Process {}
+pub trait TrigExt: Process + Sized {
+    fn seg(self, seg: usize) -> An<Seg<Self>> {
+        An(Seg::new(self, seg))
+    }
+
+    fn retrig<Trig>(self, trigger: Trig) -> An<ReTrigger<Self, Trig>>
+    where
+        Trig: Process,
+    {
+        An(ReTrigger {
+            src: self,
+            trig: trigger,
+            triggered: false,
+        })
     }
 }

@@ -12,6 +12,12 @@ pub struct LiveAdsr<Src> {
     src: Src,
 }
 
+enum Stage {
+    Idle,
+    Ads,
+    Release,
+}
+
 pub trait LiveAdsrExt: Process + Sized {
     fn adsr(self, attack: f32, decay: f32, sustain: f32, release: f32) -> An<LiveAdsr<Self>> {
         An(LiveAdsr {
@@ -29,7 +35,6 @@ pub trait LiveAdsrExt: Process + Sized {
 }
 
 impl<T> LiveAdsrExt for T where T: Process {}
-
 impl<Src> LiveAdsr<Src> {
     pub fn process(&mut self, sample_rate: f32, gate: f32) -> f32 {
         if matches!(self.stage, Stage::Idle) && gate > 0.0 {
@@ -81,12 +86,6 @@ impl<Src> LiveAdsr<Src> {
         debug_assert!(self.current >= 0.0 && self.current <= 1.0);
         self.current
     }
-}
-
-enum Stage {
-    Idle,
-    Ads,
-    Release,
 }
 
 impl<Src> Process for LiveAdsr<Src>

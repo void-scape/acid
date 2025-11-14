@@ -1,12 +1,11 @@
 fn main() {
     glazer::run(
         acid::Acid::default(),
-        &mut [],
-        0,
-        0,
+        glazer::static_frame_buffer!(800, 800, u32, 0),
+        800,
+        800,
         |_| {},
         acid::update_and_render,
-        // Some("target/debug/libacid.dylib"),
-        None,
+        Some("target/debug/libacid.so"),
     );
 }
