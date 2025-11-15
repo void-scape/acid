@@ -1,42 +1,41 @@
-use crate::{Process, ops::An};
+use crate::{F, An, Process, fmono};
 
-pub struct RngU32 {
+pub struct Rng {
     seed: u32,
     index: u32,
     xor: u32,
 }
 
-impl RngU32 {
+impl Rng {
     const XOR: u32 = 123456789;
     const NORM: f32 = 1.0 / 1_000_000_000.0;
 }
 
-pub fn ru32(seed: u32) -> An<RngU32> {
-    An(RngU32 {
+pub fn rand(seed: u32) -> An<Rng> {
+    An(Rng {
         seed,
         index: seed,
-        xor: RngU32::XOR,
+        xor: Rng::XOR,
     })
 }
 
-impl Process for RngU32 {
+impl Process for Rng {
+    type Input = ();
+    type Output = F<1>;
+
     fn reset(&mut self) {
         self.index = self.seed;
         self.xor = Self::XOR;
     }
 
-    fn sample(&mut self, _: &crate::Config) -> f32 {
-        let sample = sample_u32(self.index as usize);
+    fn sample(&mut self, _: &crate::Config, _: Self::Input) -> Self::Output {
+        let sample = RNG_TABLE[(self.index as usize) % 4096];
         self.xor ^= self.xor << 13;
         self.xor ^= self.xor >> 17;
         self.xor ^= self.xor << 5;
         self.index = self.index.wrapping_add(self.xor);
-        sample as f32 * Self::NORM
+        fmono(sample as f32 * Self::NORM)
     }
-}
-
-fn sample_u32(index: usize) -> u32 {
-    RNG_TABLE[index % 4096]
 }
 
 /// u32 values ranging from 0 to 1_000_000_000

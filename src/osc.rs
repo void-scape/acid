@@ -1,49 +1,31 @@
-use crate::{Config, Process, ops::An};
+use crate::{Config, F, MonoProcess, MonoSrcBound, An, c, fmono, process};
 
-pub struct Sine<Freq> {
-    freq: Freq,
-    phase: f64,
+pub fn sin() -> An<MonoProcess<impl FnMut(&Config, F<1>) -> F<1>>> {
+    let mut phase = 0f64;
+    process(move |config, freq: F<1>| {
+        let freq = freq[0];
+        let p = phase as f32;
+        phase += freq as f64 * config.sample_duration;
+        phase = phase.fract();
+        fmono((p * core::f32::consts::TAU).sin())
+    })
 }
 
-pub fn sin<Freq>(freq: Freq) -> An<Sine<Freq>>
-where
-    Freq: Process,
-{
-    An(Sine { freq, phase: 0.0 })
+pub fn sin_hz(hz: f32) -> An<impl MonoSrcBound> {
+    c(hz) >> sin()
 }
 
-impl<Freq> Process for Sine<Freq>
-where
-    Freq: Process,
-{
-    fn sample(&mut self, config: &Config) -> f32 {
-        let phase = self.phase;
-        self.phase += self.freq.sample(config) as f64 * config.sample_duration;
-        self.phase = self.phase.fract();
-        (phase as f32 * core::f32::consts::TAU).sin()
-    }
+pub fn saw() -> An<MonoProcess<impl FnMut(&Config, F<1>) -> F<1>>> {
+    let mut phase = 0f64;
+    process(move |config, freq: F<1>| {
+        let freq = freq[0];
+        let p = phase as f32;
+        phase += freq as f64 * config.sample_duration;
+        phase = phase.fract();
+        fmono((p % 1.0) * 2.0 - 1.0)
+    })
 }
 
-pub struct Saw<Freq> {
-    freq: Freq,
-    phase: f64,
-}
-
-pub fn saw<Freq>(freq: Freq) -> An<Saw<Freq>>
-where
-    Freq: Process,
-{
-    An(Saw { freq, phase: 0.0 })
-}
-
-impl<Freq> Process for Saw<Freq>
-where
-    Freq: Process,
-{
-    fn sample(&mut self, config: &Config) -> f32 {
-        let phase = self.phase;
-        self.phase += self.freq.sample(config) as f64 * config.sample_duration;
-        self.phase = self.phase.fract();
-        (phase % 1.0) as f32 * 2.0 - 1.0
-    }
+pub fn saw_hz(hz: f32) -> An<impl MonoSrcBound> {
+    c(hz) >> saw()
 }

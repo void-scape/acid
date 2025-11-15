@@ -1,65 +1,91 @@
-use crate::{Config, Process, init, ops::An};
+use crate::{An, Config, F, MonoSrcBound, Process, fmono};
 
-impl<T> FilterExt for T where T: Process {}
-pub trait FilterExt: Process + Sized {
-    fn limit(self, attack: f32, release: f32) -> An<impl Process> {
-        An(init(move |c| {
-            Limiter::new(self, attack, release, c.sample_rate)
-        }))
+pub fn fadein<const CHANNELS: usize>(duration: f32) -> An<FadeIn<CHANNELS>> {
+    An(FadeIn {
+        t: 0.0,
+        duration: duration as f64,
+    })
+}
+
+pub struct FadeIn<const CHANNELS: usize> {
+    t: f64,
+    duration: f64,
+}
+
+impl<const CHANNELS: usize> Process for FadeIn<CHANNELS> {
+    type Input = F<CHANNELS>;
+    type Output = F<CHANNELS>;
+
+    fn reset(&mut self) {
+        self.t = 0.0;
     }
 
-    fn lpf<Freq>(self, cutoff_hz: Freq) -> An<Biquad<Self, Freq, f32, f32>>
-    where
-        Freq: Process,
-    {
-        An(Biquad {
-            params: BiquadParams::default(),
-            freq: cutoff_hz,
-            q: 1.0,
-            src: self,
-            x1: 0.0,
-            x2: 0.0,
-            y1: 0.0,
-            y2: 0.0,
-            env: 1.0,
-            depth: 1.0,
-            mfreq: 0.0,
-        })
-    }
-
-    fn fadein(self, duration: f32) -> An<FadeIn<Self>> {
-        An(FadeIn {
-            t: 0.0,
-            duration: duration as f64,
-            src: self,
-        })
+    fn sample(&mut self, config: &Config, mut input: Self::Input) -> Self::Output {
+        for sample in input.iter_mut() {
+            if self.t < self.duration {
+                let x = self.t / self.duration;
+                let value = ((x * 6.0 - 15.0) * x + 10.0) * x * x * x;
+                self.t += config.sample_duration;
+                *sample *= value as f32;
+            }
+        }
+        input
     }
 }
 
-pub struct Biquad<Src, Freq, Q, Env> {
+pub fn lpf<Freq>(cutoff_hz: Freq) -> An<Biquad<Freq, f32, f32, f32>>
+where
+    Freq: MonoSrcBound,
+{
+    An(Biquad::new(
+        BiquadParams::default(),
+        cutoff_hz,
+        1.0,
+        1.0,
+        1.0,
+    ))
+}
+
+pub struct Biquad<Freq, Q, Env, Depth> {
     params: BiquadParams,
     x1: f64,
     x2: f64,
     y1: f64,
     y2: f64,
-    src: Src,
     freq: Freq,
     q: Q,
     env: Env,
-    depth: f64,
+    depth: Depth,
     mfreq: f64,
 }
 
-impl<Src, Freq, Q, Env> An<Biquad<Src, Freq, Q, Env>>
+impl<Freq, Q, Env, Depth> Biquad<Freq, Q, Env, Depth> {
+    pub fn new(params: BiquadParams, freq: Freq, q: Q, env: Env, depth: Depth) -> Self {
+        Biquad {
+            params,
+            x1: 0.0,
+            x2: 0.0,
+            y1: 0.0,
+            y2: 0.0,
+            freq,
+            q,
+            env,
+            depth,
+            mfreq: 0.0,
+        }
+    }
+}
+
+impl<Freq, Q, Env, Depth> An<Biquad<Freq, Q, Env, Depth>>
 where
-    Src: Process,
-    Freq: Process,
-    Q: Process,
-    Env: Process,
+    Freq: MonoSrcBound,
+    Q: MonoSrcBound,
+    Env: MonoSrcBound,
+    Depth: MonoSrcBound,
 {
-    pub fn q<Q1>(self, q: Q1) -> An<Biquad<Src, Freq, Q1, Env>>
+    pub fn q<Q1>(self, q: Q1) -> An<Biquad<Freq, Q1, Env, Depth>>
     where
-        Q1: Process,
+        Q1: MonoSrcBound,
     {
         An(Biquad {
             params: self.0.params,
@@ -67,7 +93,6 @@ where
             x2: self.0.x2,
             y1: self.0.y1,
             y2: self.0.y2,
-            src: self.0.src,
             freq: self.0.freq,
             q,
             env: self.0.env,
@@ -76,9 +101,9 @@ where
         })
     }
 
-    pub fn env<Env1>(self, env: Env1) -> An<Biquad<Src, Freq, Q, Env1>>
+    pub fn env<Env1>(self, env: Env1) -> An<Biquad<Freq, Q, Env1, Depth>>
     where
-        Env1: Process,
+        Env1: MonoSrcBound,
     {
         An(Biquad {
             params: self.0.params,
@@ -86,7 +111,6 @@ where
             x2: self.0.x2,
             y1: self.0.y1,
             y2: self.0.y2,
-            src: self.0.src,
             freq: self.0.freq,
             q: self.0.q,
             env,
@@ -95,9 +119,56 @@ where
         })
     }
 
-    pub fn depth(mut self, depth: f64) -> Self {
-        self.0.depth = depth;
-        self
+    pub fn depth<Depth1>(self, depth: Depth1) -> An<Biquad<Freq, Q, Env, Depth1>>
+    where
+        Depth1: MonoSrcBound,
+    {
+        An(Biquad {
+            params: self.0.params,
+            x1: self.0.x1,
+            x2: self.0.x2,
+            y1: self.0.y1,
+            y2: self.0.y2,
+            freq: self.0.freq,
+            q: self.0.q,
+            env: self.0.env,
+            depth,
+            mfreq: self.0.mfreq,
+        })
+    }
+}
+
+impl<Freq, Q, Env, Depth> Process for Biquad<Freq, Q, Env, Depth>
+where
+    Freq: MonoSrcBound,
+    Q: MonoSrcBound,
+    Env: MonoSrcBound,
+    Depth: MonoSrcBound,
+{
+    type Input = F<1>;
+    type Output = F<1>;
+
+    fn sample(&mut self, config: &Config, input: Self::Input) -> Self::Output {
+        let freq = self.freq.filter_mono(config) as f64;
+        let q = self.q.filter_mono(config) as f64;
+        let env = self.env.filter_mono(config) as f64;
+        let depth = self.depth.filter_mono(config) as f64;
+        let mfreq = freq * 2f64.powf(depth * env);
+
+        if self.mfreq != mfreq {
+            self.params = BiquadParams::lpf(mfreq, q, config.sample_rate);
+            self.mfreq = mfreq;
+        }
+
+        let x0 = input[0] as f64;
+        let y0 = self.params.b0 * x0 + self.params.b1 * self.x1 + self.params.b2 * self.x2
+            - self.params.a1 * self.y1
+            - self.params.a2 * self.y2;
+        self.x2 = self.x1;
+        self.x1 = x0;
+        self.y2 = self.y1;
+        self.y1 = y0;
+        fmono(y0 as f32)
     }
 }
 
@@ -129,50 +200,18 @@ impl BiquadParams {
     }
 }
 
-impl<Src, Freq, Q, Env> Process for Biquad<Src, Freq, Q, Env>
-where
-    Src: Process,
-    Freq: Process,
-    Q: Process,
-    Env: Process,
-{
-    fn sample(&mut self, config: &Config) -> f32 {
-        let freq = self.freq.sample(config) as f64;
-        let q = self.q.sample(config) as f64;
-        let env = self.env.sample(config) as f64;
-        let mfreq = freq * 2f64.powf(self.depth * env);
-
-        if self.mfreq != mfreq {
-            self.params = BiquadParams::lpf(mfreq, q, config.sample_rate);
-            self.mfreq = mfreq;
-        }
-
-        let x0 = self.src.sample(config) as f64;
-        let y0 = self.params.b0 * x0 + self.params.b1 * self.x1 + self.params.b2 * self.x2
-            - self.params.a1 * self.y1
-            - self.params.a2 * self.y2;
-        self.x2 = self.x1;
-        self.x1 = x0;
-        self.y2 = self.y1;
-        self.y1 = y0;
-        y0 as f32
-    }
-}
-
-pub struct Limiter<Src> {
+pub struct Limiter {
     follower: Follower,
     buffer: Vec<f32>,
     index: usize,
-    src: Src,
 }
 
-impl<Src> Limiter<Src> {
-    pub fn new(src: Src, attack: f32, release: f32, sample_rate: f64) -> Self {
+impl Limiter {
+    pub fn new(attack: f32, release: f32, sample_rate: f64) -> Self {
         Self {
             follower: Follower::new(attack, release, sample_rate),
             buffer: (0..440).map(|_| 0.0).collect(),
             index: 0,
-            src,
         }
     }
 
@@ -188,16 +227,6 @@ impl<Src> Limiter<Src> {
             .fold(0.0, f64::max);
         let limit = self.follower.filter(1f64.max(peak * 1.1));
         sample / limit
-    }
-}
-
-impl<Src> Process for Limiter<Src>
-where
-    Src: Process,
-{
-    fn sample(&mut self, config: &Config) -> f32 {
-        let sample = self.src.sample(config);
-        self.limit(sample)
     }
 }
 
@@ -224,32 +253,5 @@ impl Follower {
             self.env = self.rel * (self.env - abs) + abs;
         }
         self.env as f32
-    }
-}
-
-pub struct FadeIn<Src> {
-    t: f64,
-    duration: f64,
-    src: Src,
-}
-
-impl<Src> Process for FadeIn<Src>
-where
-    Src: Process,
-{
-    fn reset(&mut self) {
-        self.t = 0.0;
-    }
-
-    fn sample(&mut self, config: &Config) -> f32 {
-        let sample = self.src.sample(config);
-        if self.t < self.duration {
-            let x = self.t / self.duration;
-            let value = ((x * 6.0 - 15.0) * x + 10.0) * x * x * x;
-            self.t += config.sample_duration;
-            sample * value as f32
-        } else {
-            sample
-        }
     }
 }
